@@ -1,0 +1,71 @@
+---
+title: "Predicting way of doing exercise"
+author: "Abdul Baseer Buriro"
+date: "11/9/2020"
+output: 
+  html_document
+---
+
+## Background
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. 
+
+## Data Preprocessing
+The training set contains 19622 observations and 159 features/attributes/predictors. The "classe" variable is the outcome. Some of the features like name, index, and window information are apparently irrelevant. Whereas, other features of statistial nature like variance, skewness, standard devidation, and mean/average are one data point and depend on sample size. Such features contain many 'NA', and consequenlty, are irrelevant. Features mentioned above are unlikely to contribute in the classification and therefore were discarded at preprocessing stage.    
+Additionally, highly redundant features having correlation coefficient \abs(r)>0.90 and constant features having near zero variance were discarded.
+```{r preprocess,echo=FALSE}
+library(dplyr)
+library(caret)
+library(corrplot)
+training <- read.csv("pml-training.csv")
+testing <- read.csv("pml-testing.csv")
+#str(training)
+toExclude <- grep('X|user_name|time|window|kurtosis|skewness|max|min|amplitude|avg|var|stddev', names(training))
+Clean_training <- training[,-toExclude]
+testing <- testing[,-toExclude]
+test_feat <- select(testing,-problem_id)
+#
+train_lab <- Clean_training$classe
+train_feat <- select(Clean_training,-classe)
+rm(training,Clean_training)
+#---------------------------------
+C <- cor(train_feat, use = "everything", method = 'pearson')
+c <- dim(C);  c <- c[1]
+mm <- abs(C) > 0.90
+mm <- upper.tri(mm,diag = TRUE)*mm-diag(x = 1, c, c)    # upper traingular - identity matrix
+n <- ! as.logical(colSums(mm, na.rm = FALSE, dims = 1)) # ! in logical NOT
+idx_c <- which(n, arr.ind = TRUE)                       # which is to find index correlated
+train_feat <- train_feat[,idx_c]
+#
+test_feat <- test_feat[,idx_c]
+remove(c, mm, n)
+```
+
+## Model Selection
+Next feature relevance (i.e., which feature can contribute to predict the outcome) was determined. Supervised and unservised are two broad techniques of selecting the relevat features. Unsupervised feature selection like principal component analysis gives meta featues, and subsequenlty, one may not be able to interpret as which feature is the most informative. In this assignment supervise feature/model selection was used. The training data was first used to determine the importance of individual feature using linear discriminant model and the metric used was the average of pairwise area under the curve (AUC) of receiver operating characteristic (ROC). Then built-in crossvalidation in recursive partitioning and regression tree (RPART) was used to select the relevant features, from the pool of features having mean AUC_ROC > 0.5. based on their combined accuracy.
+```{r modelSelection,echo=FALSE}
+set.seed(2020)
+mdl <- train(train_feat,train_lab,method = 'lda',importance = TRUE, preProc = 'center')
+feat_imp <- varImp(mdl,UseMethod = TRUE, scale = FALSE)
+feat_imp1 <- apply(feat_imp$importance,1,mean)
+featNo <- feat_imp1 > 0.5            # Features wrt their importance
+trData <- cbind(train_feat, train_lab)    
+tC <- trainControl(method = 'repeatedcv', repeats = 5, p = 0.7, preProc = 'center')
+fit <- train(train_lab~., data = trData, method = 'rpart', trControl = tC, tuneLength = sum(featNo), maximize = TRUE)
+#
+```
+## Testing and Accuracies
+Test accuracies were used to assess the classifier performances on hold-out data. The final classifier used was the RPART. As per figure 2, out of sample error should be arounf 0.1.
+```{r testing, echo = FALSE}
+prd <- predict(fit,test_feat)
+```
+## Plots
+
+Descrimination power of top 10 an individual features.
+```{r individual power, echo=FALSE}
+ggplot(feat_imp, top = 10)
+```
+
+5-fold crossvalidation accuracy.
+```{r combinedpower, echo=FALSE}
+plot(fit)
+```
